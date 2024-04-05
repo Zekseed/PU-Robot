@@ -36,6 +36,23 @@ drop_off_zones = {}
 drop_off_colors = [Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW]
 manual_input = False
 
+def manual_reset():
+    rotation_motor.run_angle(turnSpeed, 0, then=Stop.COAST, wait=True)
+    Elbow_motor.run_angle(turnSpeed, 0, then=Stop.COAST, wait=True)
+    claw_motor.run_angle(claw_grip_speed, 0, then=Stop.COAST, wait=True)
+    flag = False
+
+    while ev3.buttons.pressed() == [Button.DOWN] and not flag:
+        print("Reseted")
+        rotation_motor.reset_angle(0)
+        Elbow_motor.reset_angle(0)
+        claw_motor.reset_angle(0)
+        if ev3.buttons.pressed() == [Button.DOWN, Button.UP]:
+            rotation_motor.run_angle(turnSpeed, 0, then=Stop.HOLD, wait=True)
+            Elbow_motor.run_angle(turnSpeed, 0, then=Stop.HOLD, wait=True)
+            claw_motor.run_angle(claw_grip_speed, 0, then=Stop.HOLD, wait=True)
+            flag = True
+
 def update_settings(base_angle, arm_angle, claw_angle, drop_off_zones):
     file = open("settings.json", "w")
     json.dump({"base_angle": base_angle, 
@@ -55,7 +72,13 @@ def update_program_settings(settings):
     Elbow_motor.reset_angle(int(settings["arm_angle"]))
     claw_motor.reset_angle(int(settings["claw_angle"]))
     drop_off_zones = settings["drop_off_zones"]
-    drop_off_zones = {}
+    print(drop_off_zones)
+    drop_off_zones_temp = {}
+    for x, y in zip(drop_off_zones.keys(), drop_off_colors):
+            drop_off_zones_temp.update({y: drop_off_zones[x]})
+
+    drop_off_zones = drop_off_zones_temp
+    return drop_off_zones
 
 def reset_robot_by_settings():
     print("Resetting robot by settings")
@@ -85,7 +108,7 @@ def reset_robot():
 def robot_to_start():
     if not rotation_sensor.pressed():
         print("Robot going to start.")
-        rotation_motor.track_target(0)
+        rotation_motor.run_target(turnSpeed, 0, then=Stop.HOLD, wait=True)
         #rotation_motor.run_until_stalled(-50, then=Stop.COAST, duty_limit=25)
         print("Robot back to start.")
     
@@ -94,7 +117,7 @@ def claw_grab(speed):
     return claw_motor.run_until_stalled(speed, then=Stop.HOLD)
 
 def claw_release(speed, angle):
-    claw_motor.run_angle(speed, -(angle), then=Stop.COAST, wait=True)
+    claw_motor.run_target(speed, 0, then=Stop.COAST, wait=True)
 
 def lift_up(speed, angle):
     Elbow_motor.run_target(speed, angle, then=Stop.HOLD, wait=True)
@@ -111,18 +134,22 @@ def rotate_base(speed, angle):
     else:
         angle += 10
 
-    rotation_motor.track_target(angle)
-    # rotation_motor.run_angle(speed, angle, then=Stop.HOLD, wait=True)
+    # rotation_motor.track_target(angle)
+    rotation_motor.run_angle(speed, angle, then=Stop.HOLD, wait=True)
 
 if __name__ == '__main__':
+
+    while not ev3.buttons.pressed() == [Button.DOWN]:
+        if ev3.buttons.pressed() == [Button.DOWN]:
+            manual_reset()
 
     base_angle = rotation_motor.angle()
     arm_angle = Elbow_motor.angle()
     claw_angle = claw_motor.angle()
-    drop_off_zones = {"RED": 90, "GREEN": 90, "BLUE": 90, "YELLOW": 90}
+    drop_off_zones = {"Color.RED": 180, "Color.GREEN": 180, "Color.BLUE": 180, "Color.YELLOW": 180}
     update_settings(base_angle, arm_angle, claw_angle, drop_off_zones)
 
-    update_program_settings(read_settings())
+    drop_off_zones = update_program_settings(read_settings())
 
     if drop_off_zones == {}: 
         manual_input = True
@@ -182,7 +209,7 @@ if __name__ == '__main__':
         wait(1000)
 
         print("Lifting up")
-        lift_up(turnSpeed, elbow_angle)
+        lift_up(turnSpeed, elbow_angle - 10)
         wait(1000)
         
         print("GRIP ANG" + str(grip_Angle))
