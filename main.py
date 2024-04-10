@@ -28,13 +28,14 @@ rotation_sensor = TouchSensor(Port.S1)
 # Custom variables
 screen_xy = [50, 50]
 start_configuration_speech = "Input color drop off zones"
-turnSpeed = 50
-claw_grip_speed = 50
-elbow_angle = -180
-base_rot_speed = 50
+turnSpeed = 300
+claw_grip_speed = 200
+elbow_angle = -200
+base_rot_speed = 200
 drop_off_zones = {}
 drop_off_colors = [Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW]
 manual_input = False
+interval_per_click = 0.5
 
 def manual_reset():
     rotation_motor.run_angle(turnSpeed, 0, then=Stop.COAST, wait=True)
@@ -55,7 +56,7 @@ def manual_reset():
 
 def update_settings(base_angle, arm_angle, claw_angle, drop_off_zones):
     file = open("settings.json", "w")
-    json.dump({"base_angle": base_angle, 
+    json.dump({"base_angle": base_angle,
                "arm_angle": arm_angle, 
                "claw_angle": claw_angle, 
                "drop_off_zones": drop_off_zones}, 
@@ -114,7 +115,7 @@ def robot_to_start():
     
 def claw_grab(speed):
     #claw_motor.track_target(80)
-    return claw_motor.run_until_stalled(speed, then=Stop.HOLD)
+    return claw_motor.run_until_stalled(speed, then=Stop.HOLD, duty_limit=90)
 
 def claw_release(speed, angle):
     claw_motor.run_target(speed, 0, then=Stop.COAST, wait=True)
@@ -122,8 +123,8 @@ def claw_release(speed, angle):
 def lift_up(speed, angle):
     Elbow_motor.run_target(speed, angle, then=Stop.HOLD, wait=True)
 
-def lift_down(speed, angle):
-    Elbow_motor.run_angle(speed, -angle, then=Stop.COAST, wait=True)
+def lift_down(speed):
+    return Elbow_motor.run_until_stalled(speed, then=Stop.COAST, duty_limit=10)
 
 def detect_color():
     return color_sensor.color()
@@ -137,24 +138,149 @@ def rotate_base(speed, angle):
     # rotation_motor.track_target(angle)
     rotation_motor.run_angle(speed, angle, then=Stop.HOLD, wait=True)
 
-if __name__ == '__main__':
-
-    while not ev3.buttons.pressed() == [Button.DOWN]:
+def set_sort_interval():
+    interval = 1000
+    while not ev3.buttons.pressed() == [Button.CENTER]:
         if ev3.buttons.pressed() == [Button.DOWN]:
-            manual_reset()
+            # 60000 = 1 minute
+            if interval >= (60000 * interval_per_click):
+                interval -= 60000 * interval_per_click
+                ev3.screen.clear()
+                ev3.screen.draw_text(screen_xy[0], screen_xy[1], str(interval//60000) + "minutes", text_color=Color.BLACK, background_color=None)
+        elif ev3.buttons.pressed() == [Button.UP]:
+            interval += 60000 * interval_per_click
+            ev3.screen.clear()
+            ev3.screen.draw_text(screen_xy[0], screen_xy[1], str(interval//60000) + "minutes", text_color=Color.BLACK, background_color=None)
+        wait(250)
+    return interval
+
+
+def _main_loop(interval=1000):
+    wait(interval)
+    #claw_release(claw_grip_speed, grip_Angle)
+    ground_angle = lift_down(turnSpeed)
+    print("ground angle = " + str(ground_angle))
+    print("Lifting down")
+
+    print("Getting grip angle and grabbing")
+    grip_Angle = claw_grab(claw_grip_speed)
+
+    print("Lifting up")
+    lift_up(turnSpeed, elbow_angle - ground_angle - 10)
+    print("Calculated elbow angle = " + str(elbow_angle - ground_angle))
+        
+    print("GRIP ANG" + str(grip_Angle))
+
+    wait(500)
+    current_color = detect_color()
+    print(current_color)
+        
+    color_test = [i for i in drop_off_colors if i == current_color]
+    while len(color_test) == 0:
+        print("No color detected")
+        #claw_motor.run_until_stalled(claw_grip_speed, then=Stop.HOLD, duty_limit=90)
+
+        print("Releasing claw")
+        claw_release(claw_grip_speed, grip_Angle)
+            
+        print("Lifting down")
+        lift_down(turnSpeed)
+            
+        print("Getting grip angle and grabbing")
+        grip_Angle = claw_grab(claw_grip_speed)
+
+        print("Lifting up")
+        lift_up(turnSpeed, elbow_angle)
+            
+        current_color = detect_color()
+        print(current_color)
+
+        color_test = [i for i in drop_off_colors if i == current_color]             
+            
+    print("Rotating to drop off zone")
+    rotate_base(base_rot_speed, drop_off_zones[current_color])
+
+    print("Lifting down 2")
+    lift_down(turnSpeed)
+
+    print("Releasing claw 2")
+    claw_release(claw_grip_speed, grip_Angle)
+
+    print("Lifting up 2")
+    lift_up(turnSpeed, elbow_angle)
+
+    print("Rotating to start")
+    rotate_base(base_rot_speed, -drop_off_zones[current_color])
+    _main_loop(interval)
+
+# async def emergency_stop():
+#     while True:
+#         await ev3.buttons.pressed() == [Button.BACKSPACE]:
+#             # TODO 
+#             reset_robot()
+#             break
+
+def set_manual_locations():
+    
+    ev3.speaker.say(start_configuration_speech)
+    ev3.screen.draw_text(screen_xy[0], screen_xy[1], start_configuration_speech, text_color=Color.BLACK, background_color=None)
+    
+    # Set drop off zones for each color in drop_off_colors RED, GREEN, BLUE, YELLOW
+    index = 0
+    lastIndex = -1
+    while len(drop_off_zones) < len(drop_off_colors):
+        if (index != lastIndex):
+            lastIndex = index
+            ev3.screen.clear()
+            ev3.speaker.say("Input destination for " + str(drop_off_colors[index]).replace("Color.", ''))
+            ev3.screen.draw_text(screen_xy[0], screen_xy[1], "Input destination for color: " + str(drop_off_colors[index]).replace("Color.", ''), text_color=Color.BLACK, background_color=None)
+        if ev3.buttons.pressed() == [Button.CENTER]:
+            print(ev3.buttons.pressed())
+            drop_off_zones.update({drop_off_colors[index] : rotation_motor.angle()})
+            index += 1
+
+        elif ev3.buttons.pressed() == [Button.RIGHT]:
+            print(ev3.buttons.pressed())
+            rotation_motor.run(turnSpeed)
+
+        elif ev3.buttons.pressed() == [Button.LEFT]:
+            print(ev3.buttons.pressed())
+            rotation_motor.run(-turnSpeed)
+
+        else:
+            rotation_motor.stop()
+
+def main_menu():
+    ev3.screen.clear()
+    ev3.screen.draw_text(20, 50, "set sort interval", text_color=Color.BLACK, background_color=None)
+    ev3.screen.draw_text(50, 70, "start sort", text_color=Color.BLACK, background_color=None)
+    ev3.screen.draw_text(50, 20, "set manual locations", text_color=Color.BLACK, background_color=None)
+    #ev3.screen.draw_text(70, 20, "", text_color=Color.BLACK, background_color=None)
+    
+    while len(ev3.buttons.pressed()) == 0:
+        if ev3.buttons.pressed() == [Button.DOWN]:
+            set_manual_locations()
+        elif ev3.buttons.pressed() == [Button.UP]:
+            _main_loop(1000)
+        elif ev3.buttons.pressed() == [Button.RIGHT]:
+            set_sort_interval()
+        wait(250)
+
+if __name__ == '__main__':
+    
+    main_menu()
+
+    #while not ev3.buttons.pressed() == [Button.DOWN]:
+    #    if ev3.buttons.pressed() == [Button.DOWN]:
+    #        manual_reset()
 
     base_angle = rotation_motor.angle()
     arm_angle = Elbow_motor.angle()
     claw_angle = claw_motor.angle()
-    drop_off_zones = {"Color.RED": 180, "Color.GREEN": 180, "Color.BLUE": 180, "Color.YELLOW": 180}
+    drop_off_zones = {"Color.RED": 90, "Color.GREEN": 180, "Color.BLUE": 225, "Color.YELLOW": 180}
     update_settings(base_angle, arm_angle, claw_angle, drop_off_zones)
 
     drop_off_zones = update_program_settings(read_settings())
-
-    if drop_off_zones == {}: 
-        manual_input = True
-    else:
-        manual_input = False
 
     print("Starting robot")
 
@@ -162,99 +288,18 @@ if __name__ == '__main__':
 
     # reset_robot()
     reset_robot_by_settings()
-
-    ev3.speaker.say(start_configuration_speech)
-    ev3.screen.draw_text(screen_xy[0], screen_xy[1], start_configuration_speech, text_color=Color.BLACK, background_color=None)
     
-    if manual_input:
-        
-        # Set drop off zones for each color in drop_off_colors RED, GREEN, BLUE, YELLOW
-        index = 0
-        lastIndex = -1
-        while len(drop_off_zones) < len(drop_off_colors):
-            if (index != lastIndex):
-                lastIndex = index
-                ev3.screen.clear()
-                ev3.speaker.say("Input destination for " + str(drop_off_colors[index]).replace("Color.", ''))
-                ev3.screen.draw_text(screen_xy[0], screen_xy[1], "Input destination for color: " + str(drop_off_colors[index]).replace("Color.", ''), text_color=Color.BLACK, background_color=None)
-            if ev3.buttons.pressed() == [Button.CENTER]:
-                print(ev3.buttons.pressed())
-                drop_off_zones.update({drop_off_colors[index] : rotation_motor.angle()})
-                index += 1
+    interval = set_sort_interval()
 
-            elif ev3.buttons.pressed() == [Button.RIGHT]:
-                print(ev3.buttons.pressed())
-                rotation_motor.run(turnSpeed)
-
-            elif ev3.buttons.pressed() == [Button.LEFT]:
-                print(ev3.buttons.pressed())
-                rotation_motor.run(-turnSpeed)
-
-            else:
-                rotation_motor.stop()
-    
     print("Done setting settings")
     robot_to_start()
 
+    """
+        asyncio.run(emergency_stop())
+        
+    """
+
+    _main_loop(interval)
     print(drop_off_zones)
-
-    for i in range(len(drop_off_colors)):
-        #claw_release(claw_grip_speed, grip_Angle)
-        lift_down(turnSpeed, elbow_angle + 10)
-        print("Lifting down")
-        wait(1000)
-
-        print("Getting grip angle and grabbing")
-        grip_Angle = claw_grab(claw_grip_speed)
-        wait(1000)
-
-        print("Lifting up")
-        lift_up(turnSpeed, elbow_angle - 10)
-        wait(1000)
-        
-        print("GRIP ANG" + str(grip_Angle))
-
-        current_color = detect_color()
-        print(current_color)
-        
-        color_test = [i for i in drop_off_colors if i == current_color] 
-        while len(color_test) == 0:
-            print("No color detected")
-            #claw_motor.run_until_stalled(claw_grip_speed, then=Stop.HOLD, duty_limit=90)
-
-            print("Releasing claw")
-            claw_release(claw_grip_speed, grip_Angle)
-            
-            print("Lifting down")
-            lift_down(turnSpeed, elbow_angle)
-            
-            print("Getting grip angle and grabbing")
-            grip_Angle = claw_grab(claw_grip_speed)
-
-            print("Lifting up")
-            lift_up(turnSpeed, elbow_angle)
-            
-            current_color = detect_color()
-            print(current_color)
-
-            color_test = [i for i in drop_off_colors if i == current_color]             
-            
-        print("Rotating to drop off zone")
-        rotate_base(base_rot_speed, drop_off_zones[current_color])
-
-        wait(1000)
-
-        print("Lifting down 2")
-        lift_down(turnSpeed, elbow_angle)
-
-        print("Releasing claw 2")
-        claw_release(claw_grip_speed, grip_Angle)
-
-        print("Lifting up 2")
-        lift_up(turnSpeed, elbow_angle)
-
-        print("Rotating to start")
-        rotate_base(base_rot_speed, -drop_off_zones[current_color])
-        wait(5000)
     
     reset_robot()
