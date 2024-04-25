@@ -38,6 +38,12 @@ drop_off_colors = [Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW]
 manual_input = False
 interval_per_click = 0.5
 
+zone_storage = {}
+for i in drop_off_colors:
+    zone_storage.update({i: 0})
+
+"""
+OBSOLETE
 def manual_reset():
     rotation_motor.run_angle(turnSpeed, 0, then=Stop.COAST, wait=True)
     Elbow_motor.run_angle(turnSpeed, 0, then=Stop.COAST, wait=True)
@@ -54,8 +60,17 @@ def manual_reset():
             Elbow_motor.run_angle(turnSpeed, 0, then=Stop.HOLD, wait=True)
             claw_motor.run_angle(claw_grip_speed, 0, then=Stop.HOLD, wait=True)
             flag = True
+"""
 
 def update_settings(base_angle, arm_angle, claw_angle, drop_off_zones):
+
+    drop_off_zones_temp = {}
+    for x, y in zip(drop_off_zones.keys(), drop_off_colors):
+            y = str(y)
+            y.replace("Color.", '')
+            drop_off_zones_temp.update({y: drop_off_zones[x]})
+    drop_off_zones = drop_off_zones_temp
+
     file = open("settings.json", "w")
     json.dump({"base_angle": base_angle,
                "arm_angle": arm_angle, 
@@ -89,6 +104,8 @@ def reset_robot_by_settings():
     claw_motor.run_target(claw_grip_speed, 0, then=Stop.HOLD, wait=True)
     print("Done resetting robot by settings")
 
+"""
+OBSOLETE
 
 def reset_robot():
     if not rotation_sensor.pressed():
@@ -107,6 +124,7 @@ def reset_robot():
 
     print("Done resetting robot.")
 
+"""
 def robot_to_start():
     if not rotation_sensor.pressed():
         print("Robot going to start.")
@@ -116,16 +134,16 @@ def robot_to_start():
     
 def claw_grab(speed):
     #claw_motor.track_target(80)
-    return claw_motor.run_until_stalled(speed, then=Stop.HOLD, duty_limit=80)
+    return claw_motor.run_until_stalled(speed, then=Stop.HOLD, duty_limit=60) # dl was 80
 
 def claw_release(speed, angle):
     claw_motor.run_target(speed, 0, then=Stop.COAST, wait=True)
 
-def lift_up(speed, angle):
-    Elbow_motor.run_target(speed, angle, then=Stop.HOLD, wait=True)
+def lift_up(speed, angle, height):
+    Elbow_motor.run_angle(speed, angle + height, then=Stop.HOLD, wait=True)
 
-def lift_down(speed):
-    return Elbow_motor.run_until_stalled(speed, then=Stop.COAST, duty_limit=10)
+def lift_down(speed, angle, height):
+    Elbow_motor.run_angle(speed, angle - height, then=Stop.COAST, wait=True)
 
 def detect_color():
     return color_sensor.color()
@@ -136,7 +154,6 @@ def rotate_base(speed, angle):
     else:
         angle += 10
 
-    # rotation_motor.track_target(angle)
     rotation_motor.run_angle(speed, angle, then=Stop.HOLD, wait=True)
 
 def set_sort_interval():
@@ -155,64 +172,82 @@ def set_sort_interval():
         wait(250)
     return interval
 
+def start_sort(interval):
+    drop_off_zones = update_program_settings(read_settings())
+    overflow = False
 
-def _main_loop(interval):
     wait(interval)
     
-    ground_angle = abs(lift_down(turnSpeed))
-    print("ground angle = " + str(ground_angle))
-    #print("Lifting down")
+    #TODO: Implement US12
+    current_height = 0
 
     #print("Getting grip angle and grabbing")
     grip_Angle = claw_grab(claw_grip_speed)
 
     #print("Lifting up")
-    lift_up(turnSpeed, elbow_angle + ground_angle)
-    print("Calculated elbow angle = " + str(elbow_angle + ground_angle))
+    lift_up(turnSpeed, elbow_angle, 0)
         
     print("GRIP ANG = " + str(grip_Angle))
 
     wait(500)
     current_color = detect_color()
     print(current_color)
-        
+
+    for i in zone_storage:
+        if zone_storage[i] >= 3 and i == current_color:
+            overflow = True
+    
     color_test = [i for i in drop_off_colors if i == current_color]
-    while len(color_test) == 0:
+    while len(color_test) == 0 or overflow == True:
         print("No color detected")
         #claw_motor.run_until_stalled(claw_grip_speed, then=Stop.HOLD, duty_limit=90)
 
+        print("Elbow angle : " + str(elbow_angle))
+        print("Current Height : " + str(current_height))
+
         #print("Releasing claw")
         claw_release(claw_grip_speed, grip_Angle)
-            
+
         #print("Lifting down")
-        lift_down(turnSpeed)
-            
+        lift_down(turnSpeed, -elbow_angle, 0)
+
         #print("Getting grip angle and grabbing")
         grip_Angle = claw_grab(claw_grip_speed)
 
-        #print("Lifting up")
-        lift_up(turnSpeed, elbow_angle + ground_angle)
+        lift_up(turnSpeed, elbow_angle, 0)
             
         current_color = detect_color()
         print(current_color)
 
-        color_test = [i for i in drop_off_colors if i == current_color]             
-            
+        for i in zone_storage:
+            if zone_storage[i] < 3 and i == current_color:
+                overflow = False
+
+        color_test = [i for i in drop_off_colors if i == current_color]
+
+    current_height = zone_storage[current_color] * 110
+    zone_storage[current_color] += 1
+    print("Zone storage: " + str(zone_storage))
+    print("current height: " + str(current_height))
+
     #print("Rotating to drop off zone")
     rotate_base(base_rot_speed, drop_off_zones[current_color])
 
     #print("Lifting down 2")
-    lift_down(turnSpeed)
+    lift_down(turnSpeed, -elbow_angle, current_height)
 
     #print("Releasing claw 2")
     claw_release(claw_grip_speed, grip_Angle)
 
     #print("Lifting up 2")
-    lift_up(turnSpeed, elbow_angle)
+    lift_up(turnSpeed, elbow_angle, current_height)
 
     #print("Rotating to start")
     rotate_base(base_rot_speed, -drop_off_zones[current_color])
-    _main_loop(interval)
+
+    #print("Lifting down 2")
+    lift_down(turnSpeed, -elbow_angle, 0)
+    start_sort(interval)
 
 """ 
 from multiprocessing import Process 
@@ -264,7 +299,15 @@ def set_manual_locations():
         else:
             rotation_motor.stop()
     
-    rotate_base(base_rot_speed, start_angle)
+    rotation_motor.track_target(start_angle)
+    #rotate_base(base_rot_speed, start_angle) # start_angle should be start, i.e. 0
+
+    drop_off_zones_temp = {}
+    for x, y in zip(drop_off_zones, drop_off_colors):
+        y = str(y)
+        y.replace("Color.", '')
+        drop_off_zones_temp.update({y: drop_off_zones[x]})
+
     update_settings(rotation_motor.angle(), Elbow_motor.angle(), claw_motor.angle(), drop_off_zones)
     main_menu()
 
@@ -297,15 +340,14 @@ def check_locations():
             pass
         wait(250)
 
-    lift_down(turnSpeed)
-    lift_up(turnSpeed, elbow_angle)
+    lift_down(turnSpeed, -elbow_angle, 0)
+    lift_up(turnSpeed, elbow_angle, 0)
 
     print("Rotating to drop off zone")
     rotate_base(base_rot_speed, drop_off_zones[checking_location])
 
 
-    print("Lifting down 2")
-    impact_angle = lift_down(turnSpeed)
+    Elbow_motor.run_until_stalled(turnSpeed, then=Stop.COAST, duty_limit=10)
     print("Impact angle = " + str(impact_angle))
     if impact_angle < 40:
         print("Detected")
@@ -314,12 +356,61 @@ def check_locations():
         ev3.speaker.say("NOT DETECTED")
 
     print("Lifting up 2")
-    lift_up(turnSpeed, elbow_angle)
+    lift_up(turnSpeed, elbow_angle, 0)
 
     print("Rotating to start")
     rotate_base(base_rot_speed, -drop_off_zones[checking_location])
     
     main_menu()
+
+def conveyor_sort():
+    drop_off_zones = update_program_settings(read_settings())
+    
+    current_height = -120
+    storage_height = 0
+    current_color = None
+
+    while current_color not in drop_off_colors:
+        current_color = detect_color()
+
+    print(current_color)
+    
+    wait(900)
+    
+    current_color = detect_color()
+
+    #TODO if real color check fails 
+
+    print(current_color)
+
+    lift_down(turnSpeed, 0, current_height)
+    
+    grip_Angle = claw_grab(claw_grip_speed)
+
+    lift_up(turnSpeed, 0, current_height)
+    
+    for i in zone_storage:
+        if zone_storage[i] >= 3 and i == current_color:
+            overflow = True
+
+    #TODO if color overflow
+
+    storage_height = zone_storage[current_color] * 110
+    zone_storage[current_color] += 1
+    print("Zone storage: " + str(zone_storage))
+    print("current height: " + str(current_height))
+
+    rotate_base(base_rot_speed, drop_off_zones[current_color])
+    
+    lift_down(turnSpeed, -elbow_angle, current_height + storage_height) # TODO
+
+    claw_release(claw_grip_speed, grip_Angle)
+
+    lift_up(turnSpeed, elbow_angle, current_height + storage_height)
+
+    rotate_base(base_rot_speed, -drop_off_zones[current_color])
+
+    conveyor_sort()
 
 def main_menu():
     ev3.screen.clear()
@@ -334,10 +425,10 @@ def main_menu():
     while len(ev3.buttons.pressed()) != 2:
         print(ev3.buttons.pressed())
         if ev3.buttons.pressed() == [Button.UP]:
-            #set_manual_locations()
+            set_manual_locations()
             break
         elif ev3.buttons.pressed() == [Button.RIGHT]:
-            _main_loop(sort_interval)
+            start_sort(sort_interval)
             break
         elif ev3.buttons.pressed() == [Button.LEFT]:
             check_locations()
@@ -345,14 +436,17 @@ def main_menu():
         elif ev3.buttons.pressed() == [Button.DOWN]:
             sort_interval = set_sort_interval()
             break
+        elif ev3.buttons.pressed() == [Button.CENTER]:
+            conveyor_sort()
+            break
         else:
             pass
         wait(250)
 
 if __name__ == '__main__':
     
-    drop_off_zones = update_program_settings(read_settings())
-    reset_robot_by_settings()
+    # drop_off_zones = update_program_settings(read_settings())
+    # reset_robot_by_settings()
     main_menu()
 
     #while not ev3.buttons.pressed() == [Button.DOWN]:
