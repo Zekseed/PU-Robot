@@ -481,19 +481,19 @@ pause = threading.Thread(target=pause, args=main)
 def create_server():
     server = messaging.BluetoothMailboxServer()
     mbox = messaging.TextMailbox("greeting", server)
-    
-    print("Waiting for connection...")
-    server.wait_for_connection()
-    print("Connected!")
 
-    print("Waiting for message...")
+    # The server must be started before the client!
+    print("waiting for connection...")
+    server.wait_for_connection()
+    print("connected!")
+
+    # In this program, the server waits for the client to send the first message
+    # and then sends a reply.
     mbox.wait()
     print(mbox.read())
-    mbox.send("yesbox")
+    mbox.send("hello to you!")
     
 
 if __name__ == '__main__':
     create_server()
-    
-
     #main.start()
