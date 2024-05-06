@@ -1,4 +1,4 @@
-from pybricks import messaging
+from pybricks.messaging import BluetoothMailboxClient, TextMailbox
 
 SERVER = "F4:84:4C:AF:47:3D"
 
