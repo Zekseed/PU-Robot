@@ -1,7 +1,7 @@
 #!/usr/bin/env pybricks-micropython
 
 import json
-import asyncio
+import threading
 from pybricks import robotics
 from pybricks.hubs import EV3Brick
 from pybricks.ev3devices import Motor, ColorSensor, UltrasonicSensor
@@ -15,6 +15,7 @@ from pybricks.parameters import Port, Stop, Direction, Button, Color
 from pybricks.tools import wait, StopWatch, DataLog
 from pybricks.robotics import DriveBase
 from pybricks.media.ev3dev import SoundFile, ImageFile, Font
+from pybricks import messaging 
 
 # Create your objects here.
 ev3 = EV3Brick()
@@ -135,16 +136,18 @@ def robot_to_start():
     
 def claw_grab(speed):
     #claw_motor.track_target(80)
-    return claw_motor.run_until_stalled(speed, then=Stop.HOLD, duty_limit=60) # dl was 80
+    return claw_motor.run_until_stalled(speed, then=Stop.HOLD, duty_limit=60)
 
 def claw_release(speed, angle):
     claw_motor.run_target(speed, 0, then=Stop.COAST, wait=True)
 
 def lift_up(speed, angle, height):
-    Elbow_motor.run_angle(speed, angle + height, then=Stop.HOLD, wait=True)
+    Elbow_motor.run_angle(speed, -(angle) + height, then=Stop.HOLD, wait=True)
+    print("lift up height " + str(angle - height))
 
 def lift_down(speed, angle, height):
-    Elbow_motor.run_angle(speed, angle - height, then=Stop.COAST, wait=True)
+    Elbow_motor.run_angle(speed, angle - height, then=Stop.HOLD, wait=True)
+    print("lift down height " + str(-(angle) + height))
 
 def detect_color():
     return color_sensor.color()
@@ -183,12 +186,11 @@ def start_sort(interval):
     
     # Reset to pick up location
     lift_up(turnSpeed, current_height, 0)
-    rotate_base(base_rot_speed, drop_off_zones["pickup"])
+    rotate_base(base_rot_speed, drop_off_zones["pickup"][0])
 
-    
     grip_Angle = claw_grab(claw_grip_speed)
 
-    lift_up(turnSpeed, elbow_angle, current_height)
+    lift_up(turnSpeed, drop_off_zones["pickup"][1], current_height)
         
     print("GRIP ANG = " + str(grip_Angle))
 
@@ -212,12 +214,12 @@ def start_sort(interval):
         claw_release(claw_grip_speed, grip_Angle)
 
         #print("Lifting down")
-        lift_down(turnSpeed, -elbow_angle, current_height)
+        lift_down(turnSpeed, current_height, 0)
 
         #print("Getting grip angle and grabbing")
         grip_Angle = claw_grab(claw_grip_speed)
 
-        lift_up(turnSpeed, elbow_angle, current_height)
+        lift_up(turnSpeed, current_height, 0)
             
         current_color = detect_color()
         print(current_color)
@@ -237,19 +239,19 @@ def start_sort(interval):
     rotate_base(base_rot_speed, drop_off_zones[current_color][0])
 
     #print("Lifting down 2")
-    lift_down(turnSpeed, -elbow_angle, drop_off_zones[current_color][1]) # recently only current_height
+    lift_down(turnSpeed, drop_off_zones[current_color][1] + current_height, zone_storage[current_color]) # recently only current_height
 
     #print("Releasing claw 2")
     claw_release(claw_grip_speed, grip_Angle)
 
     #print("Lifting up 2")
-    lift_up(turnSpeed, elbow_angle, drop_off_zones[current_color][1]) # recently only current_height
+    lift_up(turnSpeed, drop_off_zones[current_color][1] + current_height, + zone_storage[current_color]) # recently only current_height
 
     #print("Rotating to start")
     rotate_base(base_rot_speed, -drop_off_zones[current_color][0])
 
     #print("Lifting down 2")
-    lift_down(turnSpeed, -elbow_angle, current_height)
+    lift_down(turnSpeed, current_height, 0)
     start_sort(interval)
 
 """ 
@@ -269,11 +271,14 @@ def emergency_stop():
 
 """
 
-async def pause():
-    await ev3.buttons.pressed == [Button.CENTER]
+def pause(main):
     while len(ev3.buttons.pressed) == 0 and ev3.buttons.pressed != [Button.CENTER]:
         continue
-    
+    while len(ev3.buttons.pressed) == 0 and ev3.buttons.pressed != [Button.CENTER]:
+        main.wait(1)
+
+    main.notify()
+
 def set_manual_locations():
     start_angle = rotation_motor.angle()
     drop_off_zones = {}
@@ -297,23 +302,25 @@ def set_manual_locations():
 
         elif ev3.buttons.pressed() == [Button.RIGHT]:
             print(ev3.buttons.pressed())
-            rotation_motor.run(turnSpeed)
+            rotation_motor.run(-turnSpeed)
 
         elif ev3.buttons.pressed() == [Button.LEFT]:
             print(ev3.buttons.pressed())
-            rotation_motor.run(-turnSpeed)
+            rotation_motor.run(turnSpeed)
         
         elif ev3.buttons.pressed() == [Button.UP]:
             print(ev3.buttons.pressed())
-            Elbow_motor.run(turnSpeed)
+            Elbow_motor.run(-turnSpeed/4)
 
         elif ev3.buttons.pressed() == [Button.DOWN]:
             print(ev3.buttons.pressed())
-            Elbow_motor.run(-turnSpeed)
+            Elbow_motor.run(turnSpeed/4)
 
         else:
             rotation_motor.stop()
+            Elbow_motor.stop()
     
+    Elbow_motor.track_target(drop_off_zones["pickup"][1])
     rotation_motor.track_target(start_angle)
     #rotate_base(base_rot_speed, start_angle) # start_angle should be start, i.e. 0
 
@@ -402,40 +409,40 @@ def conveyor_sort():
 
     print(current_color)
 
-    lift_down(turnSpeed, 0, current_height)
+    lift_down(turnSpeed, drop_off_zones["pickup"][1], 0)
     
     grip_Angle = claw_grab(claw_grip_speed)
 
-    lift_up(turnSpeed, 0, current_height)
+    lift_up(turnSpeed, current_height, 0)
     
     for i in zone_storage:
         if zone_storage[i] >= 3 and i == current_color:
             overflow = True
 
     if overflow == False:
-        storage_height = zone_storage[current_color] * 110
+        storage_height = zone_storage[current_color] * 70
         zone_storage[current_color] += 1
         print("Zone storage: " + str(zone_storage))
         print("current height: " + str(current_height))
 
         rotate_base(base_rot_speed, drop_off_zones[current_color][0])
 
-        lift_down(turnSpeed, -elbow_angle, current_height + storage_height)
+        lift_down(turnSpeed, drop_off_zones[current_color][1] + current_height, storage_height)
 
         claw_release(claw_grip_speed, grip_Angle)
 
-        lift_up(turnSpeed, elbow_angle, current_height + storage_height)
+        lift_up(turnSpeed, drop_off_zones[current_color][1] + current_height, storage_height)
 
         rotate_base(base_rot_speed, -drop_off_zones[current_color][0])
     else:
         claw_release(turnSpeed, grip_Angle)
-        lift_up(turnSpeed, elbow_angle, current_height+storage_height)
-        lift_down(turnSpeed, -elbow_angle, current_height + storage_height)
+        lift_up(turnSpeed, current_height, 0)
+        lift_down(turnSpeed, current_height, 0)
 
 
     conveyor_sort()
 
-async def main_menu():
+def main_menu():
     ev3.screen.clear()
     ev3.screen.set_font(Font('Lucida', 12))
     ev3.screen.draw_text(0, 0, "Set manual locations", text_color=Color.BLACK, background_color=None)
@@ -451,7 +458,7 @@ async def main_menu():
             set_manual_locations()
             break
         elif ev3.buttons.pressed() == [Button.RIGHT]:
-            await pause()
+            pause.start()
             start_sort(sort_interval)
             break
         elif ev3.buttons.pressed() == [Button.LEFT]:
@@ -461,47 +468,29 @@ async def main_menu():
             sort_interval = set_sort_interval()
             break
         elif ev3.buttons.pressed() == [Button.CENTER]:
-            await pause()
+            pause.start()
             conveyor_sort()
             break
         else:
             pass
         wait(250)
 
+main = threading.Thread(target=main_menu)
+pause = threading.Thread(target=pause, args=main)
+
+def create_server():
+    server = messaging.BluetoothMailboxServer()
+    mbox = messaging.Mailbox() #TODO
+
+def wait_for_connection():
+    print("Waiting for connection...")
+    server.wait_for_connection()
+    print("Connected!")
+
+def wait_for_message():
+    print("Waiting for message...")
+    message = server.receive()
+    print("Received message: " + message)
+
 if __name__ == '__main__':
-    
-    # drop_off_zones = update_program_settings(read_settings())
-    # reset_robot_by_settings()
-    asyncio.run(main_menu())
-
-    #while not ev3.buttons.pressed() == [Button.DOWN]:
-    #    if ev3.buttons.pressed() == [Button.DOWN]:
-    #        manual_reset()
-
-    # base_angle = rotation_motor.angle()
-    # arm_angle = Elbow_motor.angle()
-    # claw_angle = claw_motor.angle()
-    # drop_off_zones = {"Color.RED": 90, "Color.GREEN": 180, "Color.BLUE": 225, "Color.YELLOW": 180}
-    # update_settings(base_angle, arm_angle, claw_angle, drop_off_zones)
-
-
-    # print("Starting robot")
-
-    # ev3.speaker.set_speech_options(language='en-sc', voice=None, speed=None, pitch=None)
-
-    # # reset_robot()
-    
-    # interval = set_sort_interval()
-
-    # print("Done setting settings")
-    # robot_to_start()
-
-    # """
-    #     asyncio.run(emergency_stop())
-        
-    # """
-
-    # _main_loop(interval)
-    # print(drop_off_zones)
-    
-    # reset_robot()
+    main.start()
