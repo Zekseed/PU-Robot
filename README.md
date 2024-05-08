@@ -1,7 +1,7 @@
 ## Introduction
 
 In this project we have developed a program for the LEGO® MINDSTORMS EV3 programmable hub Brick using MicroPython and pybricks.
-# Refrence picture to the hub used:
+# Reference picture to the hub used:
 <picture>
   <img alt="Shows an illustrated lego programmable hub." src="https://pybricks.com/ev3-micropython/_images/ev3brick.png">
 </picture>
