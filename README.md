@@ -6,7 +6,7 @@ In this project we have developed a program for the LEGO® MINDSTORMS EV3 progra
   <img alt="Shows an illustrated lego programmable hub." src="https://pybricks.com/ev3-micropython/_images/ev3brick.png">
 </picture>
 
-In this project we are using robot arm H25. refrence picture:
+In this project we are using robot arm H25. Reference picture:
 <picture>
   <img alt="Shows an illustrated lego programmable hub." src="https://pybricks.com/ev3-micropython/_images/robot_arm.jpg">
 </picture>
